@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fire Detection System</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .camera-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 20px;
+            margin-top: 20px;
+        }
+        .camera-container {
+            position: relative;
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 15px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+        }
+        .close-btn {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: #ff4757;
+            color: white;
+            border: none;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            cursor: pointer;
+            font-size: 18px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .status.connected {
+            background: #2ed573;
+            color: white;
+        }
+        .status.error {
+            background: #ff4757;
+            color: white;
+        }
+        .spinner-border {
+            width: 1.5rem;
+            height: 1.5rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container py-4">
+        <h1 class="text-center mb-4">🔥 Fire Detection System</h1>
+        <div class="card mb-4">
+            <div class="card-body">
+                <div class="mb-3" id="camera-checkbox-list"></div>
+                <div class="row g-2 align-items-center mb-2">
+                    <div class="col-auto">
+                        <input type="text" id="custom-url" class="form-control" placeholder="hoặc nhập RTSP / HTTP link" />
+                    </div>
+                    <div class="col-auto">
+                        <button onclick="startDetection()" id="start-btn" class="btn btn-primary">Bắt đầu phát hiện</button>
+                    </div>
+                    <div class="col-auto">
+                        <button onclick="stopAllStreams()" id="stop-btn" class="btn btn-danger">Dừng tất cả</button>
+                    </div>
+                    <div class="col-auto" id="loading" style="display:none;">
+                        <div class="spinner-border text-primary spinner-border" role="status"></div>
+                        <span class="ms-2">Đang tìm camera...</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="camera-grid" id="camera-grid">
+            <!-- Camera streams will be added here dynamically -->
+        </div>
+    </div>
+
+    <script>
+        let activeStreams = new Map(); // Track active camera streams
+        let streamCounter = 0;
+
+        // Show loading indicator
+        function showLoading(message = "Đang tải...") {
+            const loading = document.getElementById("loading");
+            loading.querySelector("span").textContent = message;
+            loading.style.display = "flex";
+        }
+
+        // Hide loading indicator
+        function hideLoading() {
+            document.getElementById("loading").style.display = "none";
+        }
+
+        // Load camera options with loading indicator and render checkboxes
+        async function loadCameraOptions() {
+            showLoading("Đang tìm camera...");
+            const startBtn = document.getElementById("start-btn");
+            startBtn.disabled = true;
+            try {
+                const res = await fetch("http://localhost:8000/list-cameras");
+                const data = await res.json();
+                const cameras = data.cameras || data;
+                const checkboxList = document.getElementById("camera-checkbox-list");
+                checkboxList.innerHTML = "";
+                if (cameras.length === 0) {
+                    checkboxList.innerHTML = '<span class="text-danger">Không tìm thấy camera nào</span>';
+                } else {
+                    cameras.forEach(cam => {
+                        const div = document.createElement("div");
+                        div.className = "form-check form-check-inline mb-2";
+                        div.innerHTML = `<input class='form-check-input camera-checkbox' type='checkbox' value='${cam.id}' id='cam${cam.id}'> <label class='form-check-label' for='cam${cam.id}'>${cam.name}${cam.resolution ? ` (${cam.resolution})` : ''}</label>`;
+                        checkboxList.appendChild(div);
+                    });
+                }
+            } catch (error) {
+                console.error("Error loading cameras:", error);
+                alert("Lỗi khi tải danh sách camera: " + error.message);
+            } finally {
+                hideLoading();
+                startBtn.disabled = false;
+            }
+        }
+
+        // Start detection for selected cameras and custom URL
+        function startDetection() {
+            // Lấy các camera đã tick
+            const checked = Array.from(document.querySelectorAll('.camera-checkbox:checked')).map(cb => cb.value);
+            const customUrl = document.getElementById("custom-url").value;
+            let added = 0;
+            if (checked.length === 0 && !customUrl) {
+                alert("Vui lòng chọn ít nhất một camera hoặc nhập URL!");
+                return;
+            }
+            // Thêm các camera đã tick
+            checked.forEach(id => {
+                if (!activeStreams.has(id)) {
+                    addCameraStream(id);
+                    added++;
+                }
+            });
+            // Thêm custom URL nếu có
+            if (customUrl && !activeStreams.has(customUrl)) {
+                addCameraStream(customUrl);
+                added++;
+            }
+            if (added === 0) {
+                alert("Tất cả camera/URL đã được bật!");
+            }
+            // Clear input
+            document.getElementById("custom-url").value = "";
+        }
+
+        // Add a new camera stream to the grid
+        function addCameraStream(source) {
+            streamCounter++;
+            const streamId = `stream-${streamCounter}`;
+            const cameraGrid = document.getElementById("camera-grid");
+            
+            const cameraContainer = document.createElement("div");
+            cameraContainer.className = "camera-container";
+            cameraContainer.id = streamId;
+            
+            const cameraName = isNaN(source) ? `URL Stream ${streamCounter}` : `Camera ${source}`;
+            
+            cameraContainer.innerHTML = `
+                <button class="close-btn" onclick="stopStream('${streamId}', '${source}')" title="Đóng camera này">×</button>
+                <div class="camera-label">${cameraName}</div>
+                <img src="http://localhost:8000/video/${encodeURIComponent(source)}" 
+                     alt="Camera Stream" 
+                     onload="updateStatus('${streamId}', 'connected')"
+                     onerror="updateStatus('${streamId}', 'error')">
+                <div class="status" id="status-${streamId}">Đang kết nối...</div>
+            `;
+            
+            cameraGrid.appendChild(cameraContainer);
+            activeStreams.set(source, streamId);
+        }
+
+        // Update camera status
+        function updateStatus(streamId, status) {
+            const statusElement = document.getElementById(`status-${streamId}`);
+            if (statusElement) {
+                statusElement.className = `status ${status}`;
+                if (status === 'connected') {
+                    statusElement.textContent = "🟢 Đã kết nối";
+                } else if (status === 'error') {
+                    statusElement.textContent = "🔴 Lỗi kết nối";
+                }
+            }
+        }
+
+        // Stop a specific camera stream
+        function stopStream(streamId, source) {
+            const container = document.getElementById(streamId);
+            if (container) {
+                // Xóa thẻ <img> để ngắt kết nối HTTP stream
+                const img = container.querySelector('img');
+                if (img) {
+                    img.src = '';
+                }
+                // Chủ động gọi API backend để giải phóng camera ngay
+                fetch(`http://localhost:8000/stop-stream/${encodeURIComponent(source)}`, { 
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    mode: 'cors'
+                })
+                    .then(response => {
+                        if (!response.ok) {
+                            throw new Error(`HTTP error! status: ${response.status}`);
+                        }
+                        console.log('Stop stream successful:', source);
+                        return response.text();
+                    })
+                    .catch(err => {
+                        console.warn('Không gọi được API stop-stream:', err);
+                        // Thử gọi lại với GET (fallback)
+                        fetch(`http://localhost:8000/stop-stream/${encodeURIComponent(source)}`, { method: 'GET' })
+                            .catch(err2 => console.warn('GET fallback cũng lỗi:', err2));
+                    });
+                setTimeout(() => {
+                    container.remove();
+                }, 100); // Đợi một chút để browser ngắt kết nối
+                activeStreams.delete(source);
+            }
+        }
+
+        // Stop all camera streams
+        function stopAllStreams() {
+            if (activeStreams.size === 0) {
+                alert("Không có camera nào đang hoạt động!");
+                return;
+            }
+            if (confirm(`Bạn có chắc muốn dừng tất cả ${activeStreams.size} camera?`)) {
+                // Chủ động gọi API stop-stream cho tất cả camera đang mở
+                for (const [source, streamId] of activeStreams.entries()) {
+                    // Xóa thẻ <img> để ngắt kết nối HTTP stream
+                    const container = document.getElementById(streamId);
+                    if (container) {
+                        const img = container.querySelector('img');
+                        if (img) img.src = '';
+                    }
+                    fetch(`http://localhost:8000/stop-stream/${encodeURIComponent(source)}`, { 
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        mode: 'cors'
+                    })
+                        .then(response => {
+                            if (!response.ok) {
+                                throw new Error(`HTTP error! status: ${response.status}`);
+                            }
+                            console.log('Stop stream successful:', source);
+                            return response.text();
+                        })
+                        .catch(err => {
+                            console.warn('Không gọi được API stop-stream:', err);
+                            // Thử gọi lại với GET (fallback)
+                            fetch(`http://localhost:8000/stop-stream/${encodeURIComponent(source)}`, { method: 'GET' })
+                                .catch(err2 => console.warn('GET fallback cũng lỗi:', err2));
+                        });
+                }
+                const cameraGrid = document.getElementById("camera-grid");
+                cameraGrid.innerHTML = "";
+                activeStreams.clear();
+                streamCounter = 0;
+            }
+        }
+
+        // Load cameras when page loads
+        window.onload = loadCameraOptions;
+
+        // Allow Enter key to start detection
+        document.getElementById("custom-url").addEventListener("keypress", function(event) {
+            if (event.key === "Enter") {
+                startDetection();
+            }
+        });
+
+        // Refresh camera list periodically (every 30 seconds)
+        // setInterval(loadCameraOptions, 30000);
+    </script>
+</body>
+</html>
