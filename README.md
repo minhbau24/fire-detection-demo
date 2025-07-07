@@ -45,7 +45,4 @@ Xây dựng hệ thống phát hiện cháy tự động từ camera (webcam ho�
 - Đóng/mở từng camera không ảnh hưởng các camera khác.
 - Kết quả detect cháy hiển thị trực tiếp trên video.
 
----
 
-**Tác giả:**
-- Hệ thống phát triển bởi nhóm AI/Computer Vision, sử dụng YOLO và FastAPI.

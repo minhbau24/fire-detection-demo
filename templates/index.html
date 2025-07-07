@@ -200,27 +200,6 @@
                 if (img) {
                     img.src = '';
                 }
-                // Chủ động gọi API backend để giải phóng camera ngay
-                fetch(`http://localhost:8000/stop-stream/${encodeURIComponent(source)}`, { 
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    mode: 'cors'
-                })
-                    .then(response => {
-                        if (!response.ok) {
-                            throw new Error(`HTTP error! status: ${response.status}`);
-                        }
-                        console.log('Stop stream successful:', source);
-                        return response.text();
-                    })
-                    .catch(err => {
-                        console.warn('Không gọi được API stop-stream:', err);
-                        // Thử gọi lại với GET (fallback)
-                        fetch(`http://localhost:8000/stop-stream/${encodeURIComponent(source)}`, { method: 'GET' })
-                            .catch(err2 => console.warn('GET fallback cũng lỗi:', err2));
-                    });
                 setTimeout(() => {
                     container.remove();
                 }, 100); // Đợi một chút để browser ngắt kết nối
@@ -235,7 +214,6 @@
                 return;
             }
             if (confirm(`Bạn có chắc muốn dừng tất cả ${activeStreams.size} camera?`)) {
-                // Chủ động gọi API stop-stream cho tất cả camera đang mở
                 for (const [source, streamId] of activeStreams.entries()) {
                     // Xóa thẻ <img> để ngắt kết nối HTTP stream
                     const container = document.getElementById(streamId);
@@ -243,26 +221,6 @@
                         const img = container.querySelector('img');
                         if (img) img.src = '';
                     }
-                    fetch(`http://localhost:8000/stop-stream/${encodeURIComponent(source)}`, { 
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        },
-                        mode: 'cors'
-                    })
-                        .then(response => {
-                            if (!response.ok) {
-                                throw new Error(`HTTP error! status: ${response.status}`);
-                            }
-                            console.log('Stop stream successful:', source);
-                            return response.text();
-                        })
-                        .catch(err => {
-                            console.warn('Không gọi được API stop-stream:', err);
-                            // Thử gọi lại với GET (fallback)
-                            fetch(`http://localhost:8000/stop-stream/${encodeURIComponent(source)}`, { method: 'GET' })
-                                .catch(err2 => console.warn('GET fallback cũng lỗi:', err2));
-                        });
                 }
                 const cameraGrid = document.getElementById("camera-grid");
                 cameraGrid.innerHTML = "";
