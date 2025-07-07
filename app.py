@@ -85,65 +85,62 @@ def video_feed(source: str):
 
     async def generate():
         retry_count = 0
-        max_retries = 10
+        max_retries = 5  # Giảm số lần retry để không bị delay khi mất kết nối
         request: FastapiRequest = None
+        skip_frame = 0
+        SKIP_FRAME_COUNT = 2  # Số frame sẽ bỏ qua giữa các lần detect (ví dụ: detect 1, skip 2)
         try:
-            # Lấy request từ context (FastAPI 0.95+)
             import contextvars
             request = contextvars.copy_context().get('request', None)
         except Exception:
             pass
-        
-        # Kiểm tra client disconnect trước khi bắt đầu stream
-        try:
-            if request is not None and await request.is_disconnected():
-                print("Client already disconnected before streaming.")
-                return
-        except Exception:
-            pass
-            
+        # Resize frame nhỏ hơn để tăng tốc (nếu cần)
+        target_size = (416, 416)
         try:
             while True:
                 # Kiểm tra client disconnect thường xuyên hơn
-                try:
-                    if request is not None and await request.is_disconnected():
-                        print("Client disconnected, stopping stream.")
-                        break
-                except Exception:
-                    # Nếu không check được disconnect, giả sử client vẫn kết nối
-                    pass
-                    
+                if request is not None:
+                    try:
+                        if await request.is_disconnected():
+                            print("Client disconnected, stopping stream.")
+                            break
+                    except Exception:
+                        pass
                 ret, frame = cap.read()
                 if not ret:
                     retry_count += 1
                     if retry_count > max_retries:
                         print("Camera lost or cannot grab frame, stopping stream.")
                         break
-                    time.sleep(0.2)
+                    time.sleep(0.05)  # Retry nhanh hơn
                     continue
                 retry_count = 0
-                # Detect fire using YOLO model (if model file exists)
-                try:
-                    if os.path.exists("best.pt"):
-                        frame = detect_fire(frame)
-                except Exception as e:
-                    print(f"Fire detection error: {e}")
-                    # Continue without fire detection
-                    pass
-                _, buffer = cv2.imencode('.jpg', frame)
+                # Resize frame để tăng tốc YOLO
+                frame = cv2.resize(frame, target_size)
+                # Skip frame để tăng tốc (chỉ detect mỗi (SKIP_FRAME_COUNT+1) frame)
+                if skip_frame == 0:
+                    # Detect fire using YOLO model (if model file exists)
+                    try:
+                        if os.path.exists("best.pt"):
+                            frame = detect_fire(frame)
+                    except Exception as e:
+                        print(f"Fire detection error: {e}")
+                        pass
+                skip_frame = (skip_frame + 1) % (SKIP_FRAME_COUNT + 1)
+                # Nén ảnh với chất lượng thấp hơn để giảm độ trễ
+                _, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
                 frame_data = (b"--frame\r\n"
                              b"Content-Type: image/jpeg\r\n\r\n" + buffer.tobytes() + b"\r\n")
                 try:
                     yield frame_data
-                except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError, OSError, Exception) as e:
-                    # Client đã ngắt kết nối (socket.send() raised exception)
+                except Exception as e:
                     print(f"Client disconnected during frame send: {type(e).__name__}: {e}")
                     break
-                time.sleep(1)  # 15 FPS
+                # Không sleep hoặc sleep rất nhỏ để tăng FPS
+                time.sleep(1/5) # 15 FPS
         except Exception as e:
             print(f"Stream error: {e}")
         finally:
-            # Đảm bảo giải phóng camera và xóa khỏi dict
             print(f"[cleanup] Releasing camera for source: {source}")
             try:
                 cap.release()
