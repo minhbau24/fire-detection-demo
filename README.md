@@ -30,6 +30,7 @@ Xây dựng hệ thống phát hiện cháy tự động từ camera (webcam ho�
 
 ## Yêu cầu
 - Python 3.8+
+- link best.pt: https://drive.google.com/file/d/1vdY-hO07Pni5OlX7n4esrZPga3seAo6K/view?usp=sharing
 - Các thư viện: fastapi, uvicorn, opencv-python, ultralytics, pillow, numpy
 - File model YOLO (best.pt) đặt cùng thư mục nếu muốn detect cháy
 
