@@ -3,10 +3,10 @@ import cv2
 import os
 
 # Load model only if best.pt exists
-model = YOLO('yolo12n')
+
 if os.path.exists("best.pt"):
     try:
-        model.load("best.pt")  # Load the fine-tuned YOLO model
+        model = YOLO("best.pt") # Load the fine-tuned YOLO model
         print("Fire detection model loaded successfully!")
     except Exception as e:
         print(f"Error loading model: {e}")
